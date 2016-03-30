@@ -125,7 +125,8 @@ var end = function(cb) {
     releaseSymHandles.call(ads, function(){
         releaseNotificationHandles.call(ads, function() {
             if (ads.tcpClient) {
-                ads.tcpClient.end();
+                //ads.tcpClient.end(); // reijo removed
+                ads.tcpClient.destroy(); // reijo added
             }  
             if (cb !== undefined) cb.call(ads);     
         });
@@ -825,6 +826,11 @@ var integrateResultInHandle = function(handle, result) {
                 	break;
                 case 'TIME':
                 case 'TIME_OF_DAY':
+					var milliseconds = result.readUInt32LE(offset);
+                    value = new Date(milliseconds);
+                    var timeoffset = value.getTimezoneOffset();
+                    value = new Date(value.setMinutes(value.getMinutes() + timeoffset));
+                	break;
                 case 'DATE':
                 case 'DATE_AND_TIME':
                     var seconds = result.readUInt32LE(offset);
@@ -941,9 +947,16 @@ var getBytesFromHandle = function(handle) {
                 	break;
                 case 'TIME':
                 case 'TIME_OF_DAY':
+                	var datetime = new Date(handle[p]);
+                	var timeoffset = datetime.getTimezoneOffset();
+                    datetime = new Date(datetime.setMinutes(datetime.getMinutes() - timeoffset));
+                	buf.writeUInt32LE(datetime.getTime());
                 case 'DATE':
                 case 'DATE_AND_TIME':
-                    //TODO
+                    var datetime = new Date(handle[p]);
+                	var timeoffset = datetime.getTimezoneOffset();
+                    datetime = new Date(datetime.setMinutes(datetime.getMinutes() - timeoffset));
+                	buf.writeUInt32LE((datetime.getTime()/1000));
                     break;
             }
         } else if (typeof handle[p] === 'undefined') throw 'Property ' + p + ' not available on handle!';
