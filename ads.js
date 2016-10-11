@@ -23,6 +23,7 @@
 var net = require('net');
 var events = require('events');
 var buf = require('buffer');
+var _ = require('underscore')
 buf.INSPECT_MAX_BYTES = 200;
 
 exports.connect = function(options, cb) {
@@ -240,7 +241,7 @@ var multi_read = function(commandOptions, cb) {
     var sym_names = [];
 
 
-    var buf = new Buffer(16 + commandOptions.length*12);
+    var buf = new Buffer( commandOptions.length*12);
     var readLength = 0;
     _.each(commandOptions,function(oneOption,index){
         buf.writeUInt32LE(oneOption.indexGroup, index*12+0);
@@ -260,7 +261,7 @@ var multi_read = function(commandOptions, cb) {
         symname: sym_names,
     };
 
-    writeReadCommand.call(ads,commandOptions,function(error,result){
+    writeReadCommand.call(ads,options,function(error,result){
         if(error){
             cb(ads,error);
         }else if (result.length > 0) {
@@ -269,37 +270,50 @@ var multi_read = function(commandOptions, cb) {
             var readReults = {};
             _.each(commandOptions,function(oneOption,index){
                 if(curIndex+4 < length){
-                    readReults = {name:oneOption.name,state:result.readUInt32LE(curIndex)};
+                    readReults[oneOption.name] = {state:result.readUInt32LE(curIndex)};
                     curIndex += 4;
-                    switch(oneOption.readLength){
-                        case 1:
-                            if(curIndex+4 +1 < length){
-                                readReults.value = result.readUInt8(curIndex);
-                                curIndex += 1;
-                            }
-                            break;
-                        case 2:
-                            if(curIndex+4 +2 < length) {
-                                readReults.value = result.readUInt16LE(curIndex);
-                                curIndex += 2;
-                            }
-                            break;
-                        case 4:
-                            if(curIndex+4 +4 < length) {
-                                readReults.value = result.readUInt32LE(curIndex);
-                                curIndex += 4;
-                            }
-                            break;
-                        case 8:
-                            if(curIndex+4 +8 < length) {
-                                readReults.value = result.readDoubleLE(curIndex);
-                                curIndex += 8;
-                            }
-                            break;
-                    }
+
                 }
 
             });
+            _.each(commandOptions,function(oneOption,index){
+
+
+                var buf;
+                switch(oneOption.readLength){
+                    case 1:
+                        if(curIndex+1 <= length){
+                            buf = new Buffer(1);
+                            result.copy(buf, 0,curIndex, curIndex+1);
+                            curIndex += 1;
+                        }
+                        break;
+                    case 2:
+                        if(curIndex +2 <= length) {
+                            buf = new Buffer(2);
+                            result.copy(buf, 0,curIndex, curIndex+2);
+                            curIndex += 2;
+                        }
+                        break;
+                    case 4:
+                        if(curIndex +4 <= length) {
+                            buf = new Buffer(4);
+                            result.copy(buf, 0,curIndex, curIndex+4);
+                            curIndex += 4;
+                        }
+                        break;
+                    case 8:
+                        if(curIndex +8 <= length) {
+                            buf = new Buffer(8);
+                            result.copy(buf, 0,curIndex, curIndex+8);
+                            curIndex += 8;
+                        }
+                        break;
+                }
+                if(buf){
+                    readReults[oneOption.name].value = getValue(oneOption.type,buf,0);
+                }
+            })
 
             cb.call(ads, null, readReults);
         }
@@ -889,7 +903,57 @@ var getCommandDescription = function(commandId) {
     }
     return desc;
 };
-
+var getValue = function(dataName,result,offset){
+    var value;
+    switch(dataName) {
+        case 'BOOL':
+        case 'BYTE':
+        case 'USINT':
+            value = result.readUInt8(offset);
+            break;
+        case 'SINT':
+            value = result.readInt8(offset);
+            break;
+        case 'UINT':
+        case 'WORD':
+            value = result.readUInt16LE(offset);
+            break;
+        case 'INT':
+            value = result.readInt16LE(offset);
+            break;
+        case 'DWORD':
+        case 'UDINT':
+            value = result.readUInt32LE(offset);
+            break;
+        case 'DINT':
+            value = result.readInt32LE(offset);
+            break;
+        case 'REAL':
+            value = result.readFloatLE(offset);
+            break;
+        case 'LREAL':
+            value = result.readDoubleLE(offset);
+            break;
+        case 'STRING':
+            value = result.toString('utf8', offset, findStringEnd(result, offset));
+            break;
+        case 'TIME':
+        case 'TIME_OF_DAY':
+            var milliseconds = result.readUInt32LE(offset);
+            value = new Date(milliseconds);
+            var timeoffset = value.getTimezoneOffset();
+            value = new Date(value.setMinutes(value.getMinutes() + timeoffset));
+            break;
+        case 'DATE':
+        case 'DATE_AND_TIME':
+            var seconds = result.readUInt32LE(offset);
+            value = new Date(seconds * 1000);
+            var timeoffset = value.getTimezoneOffset();
+            value = new Date(value.setMinutes(value.getMinutes() + timeoffset));
+            break;
+    }
+    return value;
+}
 var integrateResultInHandle = function(handle, result) {
     var offset = 0;
     var l = 0;
@@ -900,53 +964,8 @@ var integrateResultInHandle = function(handle, result) {
         var value = result.slice(offset, offset + l);
 
         if (convert.isAdsType) {
-            switch(handle.bytelength[i].name) {
-                case 'BOOL':
-                case 'BYTE':
-                case 'USINT':
-                    value = result.readUInt8(offset);
-                    break;
-                case 'SINT':
-                    value = result.readInt8(offset);
-                    break;
-                case 'UINT':
-                case 'WORD':
-                    value = result.readUInt16LE(offset);
-                    break;
-                case 'INT':
-                    value = result.readInt16LE(offset);
-                    break;
-                case 'DWORD':
-                case 'UDINT':
-                    value = result.readUInt32LE(offset);
-                    break;
-                case 'DINT':
-                    value = result.readInt32LE(offset);
-                    break;
-                case 'REAL':
-                    value = result.readFloatLE(offset);
-                    break;
-                case 'LREAL':
-                    value = result.readDoubleLE(offset);
-                    break;
-                case 'STRING':
-                	value = result.toString('utf8', offset, findStringEnd(result, offset));
-                	break;
-                case 'TIME':
-                case 'TIME_OF_DAY':
-					var milliseconds = result.readUInt32LE(offset);
-                    value = new Date(milliseconds);
-                    var timeoffset = value.getTimezoneOffset();
-                    value = new Date(value.setMinutes(value.getMinutes() + timeoffset));
-                	break;
-                case 'DATE':
-                case 'DATE_AND_TIME':
-                    var seconds = result.readUInt32LE(offset);
-                    value = new Date(seconds * 1000);
-                    var timeoffset = value.getTimezoneOffset();
-                    value = new Date(value.setMinutes(value.getMinutes() + timeoffset));
-                    break;
-            }
+            value = getValue(handle.bytelength[i].name,result,offset);
+
         }
 
         handle[handle.propname[i]] = value;
