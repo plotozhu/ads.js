@@ -69,11 +69,16 @@ var getAdsObject = function(options) {
     ads.adsClient.notify = function(handle, cb) {
         return notify.call(ads, handle, cb);
     };
-
+    ads.adsClient.writeRead = function(handle, cb) {
+        return writeReadCommand.call(ads, handle, cb);
+    };
     ads.adsClient.getSymbols = function(cb) {
         return getSymbols.call(ads, cb);
     };
 
+    ads.adsClient.multiRead =function(handles,cb){
+        return multi_read.call(ads,handles,cb);
+    }
     Object.defineProperty(ads.adsClient, "options", {
         get options() { return ads.options; },
         set options(v) { ads.options = v; }
@@ -230,7 +235,76 @@ var readDeviceInfo = function(cb) {
     };
     runCommand.call(this, options); 
 };
+var multi_read = function(commandOptions, cb) {
+    var ads = this;
+    var sym_names = [];
 
+
+    var buf = new Buffer(16 + commandOptions.length*12);
+    var readLength = 0;
+    _.each(commandOptions,function(oneOption,index){
+        buf.writeUInt32LE(oneOption.indexGroup, index*12+0);
+        buf.writeUInt32LE(oneOption.indexOffset,index*12+ 4);
+        buf.writeUInt32LE(oneOption.readLength, index*12+8);
+        readLength += oneOption.readLength;
+        sym_names.push({symname:oneOption.name,length:oneOption.readLength});
+    });
+
+
+
+    var options = {
+        indexGroup: 0xF080,
+        indexOffset: commandOptions.length,
+        writeBuffer: buf,
+        readLength: readLength + commandOptions.length*4,
+        symname: sym_names,
+    };
+
+    writeReadCommand.call(ads,commandOptions,function(error,result){
+        if(error){
+            cb(ads,error);
+        }else if (result.length > 0) {
+            var length = result.length;
+            var curIndex = 0;
+            var readReults = {};
+            _.each(commandOptions,function(oneOption,index){
+                if(curIndex+4 < length){
+                    readReults = {name:oneOption.name,state:result.readUInt32LE(curIndex)};
+                    curIndex += 4;
+                    switch(oneOption.readLength){
+                        case 1:
+                            if(curIndex+4 +1 < length){
+                                readReults.value = result.readUInt8(curIndex);
+                                curIndex += 1;
+                            }
+                            break;
+                        case 2:
+                            if(curIndex+4 +2 < length) {
+                                readReults.value = result.readUInt16LE(curIndex);
+                                curIndex += 2;
+                            }
+                            break;
+                        case 4:
+                            if(curIndex+4 +4 < length) {
+                                readReults.value = result.readUInt32LE(curIndex);
+                                curIndex += 4;
+                            }
+                            break;
+                        case 8:
+                            if(curIndex+4 +8 < length) {
+                                readReults.value = result.readDoubleLE(curIndex);
+                                curIndex += 8;
+                            }
+                            break;
+                    }
+                }
+
+            });
+
+            cb.call(ads, null, readReults);
+        }
+    });
+};
 var read = function(handle, cb) {
     var ads = this;
     getHandle.call(ads, handle, function(err, handle) {
@@ -256,6 +330,7 @@ var read = function(handle, cb) {
         }
     });  
 };
+
 
 var write = function(handle, cb) {
     var ads = this;
@@ -654,6 +729,7 @@ var getReadResult = function(data, cb) {
 };
 
 var getWriteReadResult = function(data, cb) {
+
     var adsError = data.readUInt32LE(0);
     var result;
     //emitAdsError.call(this, adsError);

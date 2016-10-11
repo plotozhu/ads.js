@@ -1,6 +1,7 @@
 ads.js
 ======
-
+****  When we use notification, the notification will blocked to fire if too many notifications are defined  ***************
+****  I Add  readmulti to this packet ****
 A NodeJS implementation for the Twincat ADS protocol.  
 (Twincat and ADS is from Beckhoff &copy;. I'm not affiliated.)
 
@@ -9,6 +10,7 @@ Examples
 --------
 
 ### Hello machine
+
 
 ```javascript
 var ads = require('ads');
