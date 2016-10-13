@@ -36,7 +36,7 @@ var getAdsObject = function(options) {
     var ads = {};
     ads.options = parseOptions(options);
     ads.invokeId = 0;
-    ads.pending = [];
+    ads.pending = {};
     ads.symHandlesToRelease = [];
     ads.notificationsToRelease = [];
     ads.notifications = {};
@@ -44,15 +44,16 @@ var getAdsObject = function(options) {
     ads.tcpHeaderSize = 6;
     ads.amsHeaderSize = 32;
 
+
     var emitter = new events.EventEmitter();
     ads.adsClient = Object.create(emitter);
 
-    ads.adsClient.connect = function(cb) { 
-        return connect.call(ads, cb); 
+    ads.adsClient.connect = function(cb) {
+        return connect.call(ads, cb);
     };
 
-    ads.adsClient.end = function(cb) { 
-        return end.call(ads, cb); 
+    ads.adsClient.end = function(cb) {
+        return end.call(ads, cb);
     };
 
     ads.adsClient.readDeviceInfo = function(cb) {
@@ -84,7 +85,7 @@ var getAdsObject = function(options) {
         get options() { return ads.options; },
         set options(v) { ads.options = v; }
     });
-        
+
     return ads.adsClient;
 };
 
@@ -92,8 +93,8 @@ var connect = function(cb) {
     var ads = this;
 
     ads.tcpClient = net.connect(
-        ads.options.port, 
-        ads.options.host, 
+        ads.options.port,
+        ads.options.host,
         function() {
             cb.apply(ads.adsClient);
         }
@@ -133,8 +134,8 @@ var end = function(cb) {
             if (ads.tcpClient) {
                 //ads.tcpClient.end(); // reijo removed
                 ads.tcpClient.destroy(); // reijo added
-            }  
-            if (cb !== undefined) cb.call(ads);     
+            }
+            if (cb !== undefined) cb.call(ads);
         });
     });
 };
@@ -151,12 +152,12 @@ var ID_READ_WRITE = 9;
 
 var checkResponseStream = function() {
     var ads = this;
-    if (ads.dataStream !== null) {        
+    if (ads.dataStream !== null) {
         var headerSize = ads.tcpHeaderSize + ads.amsHeaderSize;
         if (ads.dataStream.length > headerSize) {
             var length = ads.dataStream.readUInt32LE(26);
             if (ads.dataStream.length >= headerSize + length) {
-                analyseResponse.call(ads);            
+                analyseResponse.call(ads);
             }
         }
     }
@@ -174,14 +175,15 @@ var analyseResponse = function() {
     emitAdsError.call(ads, errorId);
 
     var cb = ads.pending[invokeId];
+    delete ads.pending[invokeId];
 
-    if ((!cb) && (commandId !== ID_NOTIFICATION)) { 
+    if ((!cb) && (commandId !== ID_NOTIFICATION)) {
         console.log(ads.dataStream, invokeId, commandId);
-        throw "Recieved a response,  but I can't find the request"; 
+        throw "Recieved a response,  but I can't find the request";
     }
 
-    var totHeadSize = ads.tcpHeaderSize + ads.amsHeaderSize;  
-    var data = new Buffer(length);                 
+    var totHeadSize = ads.tcpHeaderSize + ads.amsHeaderSize;
+    var data = new Buffer(length);
     ads.dataStream.copy(data, 0, totHeadSize, totHeadSize + length);
     if (ads.dataStream.length > totHeadSize + length) {
         var nextdata = new Buffer(ads.dataStream.length - totHeadSize - length);
@@ -189,8 +191,8 @@ var analyseResponse = function() {
         ads.dataStream = nextdata;
     } else ads.dataStream = null;
 
-    switch (commandId) { 
-        case ID_READ_DEVICE_INFO: 
+    switch (commandId) {
+        case ID_READ_DEVICE_INFO:
             getDeviceInfoResult.call(this, data, cb);
             break;
         case ID_READ:
@@ -217,7 +219,7 @@ var analyseResponse = function() {
         case ID_READ_WRITE:
             getWriteReadResult.call(this, data, cb);
             break;
-        default: 
+        default:
             throw 'Unknown command';
     }
 
@@ -234,7 +236,7 @@ var readDeviceInfo = function(cb) {
         data: buf,
         cb: cb
     };
-    runCommand.call(this, options); 
+    runCommand.call(this, options);
 };
 var multi_read = function(commandOptions, cb) {
     var ads = this;
@@ -339,10 +341,10 @@ var read = function(handle, cb) {
                 integrateResultInHandle(handle, result);
                 cb.call(ads.adsClient, err, handle);
             });
-        } else { 
+        } else {
             cb.call(ads.adsClient, err);
         }
-    });  
+    });
 };
 
 
@@ -362,14 +364,14 @@ var write = function(handle, cb) {
             if(typeof handle.arrayid !== 'undefined') {
                 commandOptions += handle.totalByteLength * handle.arrayid;
             }
-            
+
             writeCommand.call(ads, commandOptions, function(err, result) {
                 cb.call(ads.adsClient, err);
             });
-        } else { 
+        } else {
             cb.call(ads.adsClient, err);
         }
-    });  
+    });
 };
 
 var notify = function(handle, cb) {
@@ -380,12 +382,12 @@ var notify = function(handle, cb) {
                 indexGroup: 0x0000F005,
                 indexOffset: handle.symhandle,
                 bytelength: handle.totalByteLength,
-                transmissionMode: handle.transmissionMode, 
-                maxDelay: handle.maxDelay, 
+                transmissionMode: handle.transmissionMode,
+                maxDelay: handle.maxDelay,
                 cycleTime: handle.cycleTime,
                 symname: handle.symname,
             };
-            
+
             addNotificationCommand.call(ads, commandOptions, function(err, notiHandle) {
                 if (ads.options.verbose > 0) {
                     console.log("Add notiHandle " + notiHandle);
@@ -394,10 +396,10 @@ var notify = function(handle, cb) {
                 this.notifications[notiHandle] = handle;
                 if (typeof cb !== 'undefined') {
                     cb.call(ads.adsClient, err);
-                } 
+                }
             });
         } else if (cb) cb.call(ads.adsClient, err);
-    });  
+    });
 };
 
 var getSymbols = function(cb) {
@@ -450,14 +452,14 @@ var getSymbols = function(cb) {
                 symbol.comment = commentBuf.toString('utf8', 0, findStringEnd(commentBuf, 0));
                 pos = pos+commentLength;
 
-                if(symbol.type.indexOf('ARRAY') > -1) {     
-                    var re = /ARRAY[\s]+\[([\-\d]+)\.\.([\-\d]+)\][\s]+of[\s]+(.*)/i;       
-                    var m;      
-                            
+                if(symbol.type.indexOf('ARRAY') > -1) {
+                    var re = /ARRAY[\s]+\[([\-\d]+)\.\.([\-\d]+)\][\s]+of[\s]+(.*)/i;
+                    var m;
+
                     if((m = re.exec(symbol.type)) !== null) {
 
                         if(m.index === re.lastIndex) {
-                            re.lastIndex++;     
+                            re.lastIndex++;
                         }
 
                         m[1] = parseInt(m[1]);
@@ -469,12 +471,12 @@ var getSymbols = function(cb) {
                             newSymbol.type = m[3] + '';
                             newSymbol.name += '[' + i + ']';
                             symbols.push(newSymbol);
-                        };  
+                        };
                     }
                 } else {
                     symbols.push(symbol);
                 }
-            }            
+            }
 
             cb.call(ads.adsClient, err, symbols);
         });
@@ -505,7 +507,7 @@ var getHandle = function(handle, cb) {
                     ads.symHandlesToRelease.push(result);
                     handle.symhandle = result.readUInt32LE(0);
                     cb.call(ads, null, handle);
-                } 
+                }
             }
         });
     } else cb.call(ads, null, handle);
@@ -531,7 +533,7 @@ var releaseSymHandle = function(symhandle, cb) {
         bytes: symhandle
     };
     writeCommand.call(this, commandOptions, function(err){
-        cb.call(ads, err);    
+        cb.call(ads, err);
     });
 };
 
@@ -552,7 +554,7 @@ var readCommand = function(commandOptions, cb) {
     var buf = new Buffer(12);
     buf.writeUInt32LE(commandOptions.indexGroup, 0);
     buf.writeUInt32LE(commandOptions.indexOffset, 4);
-    buf.writeUInt32LE(commandOptions.bytelength, 8); 
+    buf.writeUInt32LE(commandOptions.bytelength, 8);
 
     var options = {
         commandId: ID_READ,
@@ -560,14 +562,14 @@ var readCommand = function(commandOptions, cb) {
         cb: cb,
         symname: commandOptions.symname,
     };
-    runCommand.call(this, options); 
+    runCommand.call(this, options);
 };
 
 var writeCommand = function(commandOptions, cb) {
     var buf = new Buffer(12 + commandOptions.bytelength);
     buf.writeUInt32LE(commandOptions.indexGroup, 0);
     buf.writeUInt32LE(commandOptions.indexOffset, 4);
-    buf.writeUInt32LE(commandOptions.bytelength, 8); 
+    buf.writeUInt32LE(commandOptions.bytelength, 8);
     commandOptions.bytes.copy(buf, 12);
 
     var options = {
@@ -576,21 +578,21 @@ var writeCommand = function(commandOptions, cb) {
         cb: cb,
         symname: commandOptions.symname,
     };
-    runCommand.call(this, options);     
+    runCommand.call(this, options);
 };
 
 var addNotificationCommand = function(commandOptions, cb) {
     var buf = new Buffer(40);
     buf.writeUInt32LE(commandOptions.indexGroup, 0);
     buf.writeUInt32LE(commandOptions.indexOffset, 4);
-    buf.writeUInt32LE(commandOptions.bytelength, 8); 
-    buf.writeUInt32LE(commandOptions.transmissionMode, 12); 
-    buf.writeUInt32LE(commandOptions.maxDelay, 16); 
-    buf.writeUInt32LE(commandOptions.cycleTime*10000, 20); 
-    buf.writeUInt32LE(0, 24); 
-    buf.writeUInt32LE(0, 28); 
-    buf.writeUInt32LE(0, 32); 
-    buf.writeUInt32LE(0, 36); 
+    buf.writeUInt32LE(commandOptions.bytelength, 8);
+    buf.writeUInt32LE(commandOptions.transmissionMode, 12);
+    buf.writeUInt32LE(commandOptions.maxDelay, 16);
+    buf.writeUInt32LE(commandOptions.cycleTime*10000, 20);
+    buf.writeUInt32LE(0, 24);
+    buf.writeUInt32LE(0, 28);
+    buf.writeUInt32LE(0, 32);
+    buf.writeUInt32LE(0, 36);
 
     var options = {
         commandId: ID_ADD_NOTIFICATION,
@@ -598,15 +600,15 @@ var addNotificationCommand = function(commandOptions, cb) {
         cb: cb,
         symname: commandOptions.symname,
     };
-    runCommand.call(this, options);     
+    runCommand.call(this, options);
 };
 
 var writeReadCommand = function(commandOptions, cb) {
     var buf = new Buffer(16 + commandOptions.writeBuffer.length);
     buf.writeUInt32LE(commandOptions.indexGroup, 0);
     buf.writeUInt32LE(commandOptions.indexOffset, 4);
-    buf.writeUInt32LE(commandOptions.readLength, 8); 
-    buf.writeUInt32LE(commandOptions.writeBuffer.length, 12); 
+    buf.writeUInt32LE(commandOptions.readLength, 8);
+    buf.writeUInt32LE(commandOptions.writeBuffer.length, 12);
     commandOptions.writeBuffer.copy(buf, 16);
 
     var options = {
@@ -615,7 +617,7 @@ var writeReadCommand = function(commandOptions, cb) {
         cb: cb,
         symname: commandOptions.symname,
     };
-    runCommand.call(this, options); 
+    runCommand.call(this, options);
 };
 
 var deleteDeviceNotificationCommand = function(notificationHandle, cb) {
@@ -627,7 +629,7 @@ var deleteDeviceNotificationCommand = function(notificationHandle, cb) {
         data: buf,
         cb: cb
     };
-    runCommand.call(this, options); 
+    runCommand.call(this, options);
 };
 
 var runCommand = function(options) {
@@ -649,7 +651,7 @@ var runCommand = function(options) {
     //4 bytes length
     header.writeUInt32LE(headerSize + options.data.length, offset);
     offset += 4;
-    
+
     //6 bytes: amsNetIdTarget
     var amsNetIdTarget = this.options.amsNetIdTarget.split('.');
     for (var i=0; i<amsNetIdTarget.length;i++)
@@ -677,7 +679,7 @@ var runCommand = function(options) {
     //2 bytes: amsPortTarget
     header.writeUInt16LE(this.options.amsPortSource, offset);
     offset += 2;
-    
+
     //2 bytes: Command ID
     header.writeUInt16LE(options.commandId, offset);
     offset += 2;
@@ -724,9 +726,9 @@ var getDeviceInfoResult = function(data, cb){
             versionBuild: data.readUInt16LE(6),
             deviceName: data.toString('utf8', 8, findStringEnd(data, 8))
         };
-    }    
+    }
 
-    cb.call(this.adsClient, err, result); 
+    cb.call(this.adsClient, err, result);
 };
 
 var getReadResult = function(data, cb) {
@@ -737,7 +739,7 @@ var getReadResult = function(data, cb) {
     if (!err) {
         var bytelength = data.readUInt32LE(4);
         result = new Buffer(bytelength);
-        data.copy(result, 0, 8, 8 + bytelength);        
+        data.copy(result, 0, 8, 8 + bytelength);
     }
     cb.call(this, err, result);
 };
@@ -820,7 +822,7 @@ var getNotificationResult = function(data) {
             } else {
                 if (this.options.verbose > 0) {
                     console.log("skipping notification " + notiHandle);
-                }    
+                }
             }
         }
     }
@@ -838,16 +840,16 @@ var stringToBuffer = function(someString) {
 var parseOptions = function(options) {
 
     //Defaults
-    if (typeof options.port === 'undefined') { 
-        options.port = 48898; 
+    if (typeof options.port === 'undefined') {
+        options.port = 48898;
     }
 
-    if (typeof options.amsPortSource === 'undefined') { 
-        options.amsPortSource = 32905; 
+    if (typeof options.amsPortSource === 'undefined') {
+        options.amsPortSource = 32905;
     }
 
-    if (typeof options.amsPortTarget === 'undefined') { 
-        options.amsPortTarget = 801; 
+    if (typeof options.amsPortTarget === 'undefined') {
+        options.amsPortTarget = 801;
     }
 
     if (typeof options.host === 'undefined') {
@@ -872,8 +874,8 @@ var parseOptions = function(options) {
 var getCommandDescription = function(commandId) {
 
     var desc = "Unknown command";
-    switch (commandId) { 
-        case ID_READ_DEVICE_INFO: 
+    switch (commandId) {
+        case ID_READ_DEVICE_INFO:
             desc = "Read device info";
             break;
         case ID_READ:
@@ -977,7 +979,7 @@ var integrateResultInHandle = function(handle, result) {
 
 var parseHandle = function(handle){
     if (typeof handle.symname === 'undefined') {
-        throw "The handle doesn't have a symname property!";    
+        throw "The handle doesn't have a symname property!";
     }
 
     if (typeof handle.propname !== 'undefined') {
@@ -996,11 +998,11 @@ var parseHandle = function(handle){
 
     handle.totalByteLength = 0;
     for (var i=0; i<handle.bytelength   .length; i++) {
-         if (typeof handle.bytelength[i]  === 'number') {
-            handle.totalByteLength += handle.bytelength[i];        
+        if (typeof handle.bytelength[i]  === 'number') {
+            handle.totalByteLength += handle.bytelength[i];
         }
         if (typeof handle.bytelength[i]  === 'object') {
-            handle.totalByteLength += handle.bytelength[i].length;       
+            handle.totalByteLength += handle.bytelength[i].length;
         }
     }
 
@@ -1069,21 +1071,21 @@ var getBytesFromHandle = function(handle) {
                     buf.writeDoubleLE(handle[p], offset);
                     break;
                 case 'STRING':
-                	var stringbuf = new Buffer(handle[p].toString() + "\0", "utf8");
-                	stringbuf.copy(buf, offset);
-                	break;
+                    var stringbuf = new Buffer(handle[p].toString() + "\0", "utf8");
+                    stringbuf.copy(buf, offset);
+                    break;
                 case 'TIME':
                 case 'TIME_OF_DAY':
-                	var datetime = new Date(handle[p]);
-                	var timeoffset = datetime.getTimezoneOffset();
+                    var datetime = new Date(handle[p]);
+                    var timeoffset = datetime.getTimezoneOffset();
                     datetime = new Date(datetime.setMinutes(datetime.getMinutes() - timeoffset));
-                	buf.writeUInt32LE(datetime.getTime());
+                    buf.writeUInt32LE(datetime.getTime());
                 case 'DATE':
                 case 'DATE_AND_TIME':
                     var datetime = new Date(handle[p]);
-                	var timeoffset = datetime.getTimezoneOffset();
+                    var timeoffset = datetime.getTimezoneOffset();
                     datetime = new Date(datetime.setMinutes(datetime.getMinutes() - timeoffset));
-                	buf.writeUInt32LE((datetime.getTime()/1000));
+                    buf.writeUInt32LE((datetime.getTime()/1000));
                     break;
             }
         } else if (typeof handle[p] === 'undefined') throw 'Property ' + p + ' not available on handle!';
@@ -1097,7 +1099,7 @@ var getItemByteLength = function(bytelength, convert) {
     if (typeof bytelength === 'number') {
         l = bytelength;
     } else {
-        l = bytelength.length; 
+        l = bytelength.length;
         convert.isAdsType = true;
     }
     return l;
@@ -1127,7 +1129,7 @@ var logPackage = function(info, buf, commandId, invokeId, symname) {
 
     if (symname !== undefined) {
         msg += " symname: " + symname;
-    } 
+    }
 
     if (this.options.verbose > 0) {
         console.log(msg);
@@ -1179,7 +1181,7 @@ var getError = function(errorId) {
             case 25: msg = "No memory"; break;
             case 26: msg = "TCP send error"; break;
             case 27: msg = "Host unreachable"; break;
-                       
+
             case 1792: msg="error class <device error>"; break;
             case 1793: msg="Service is not supported by server"; break;
             case 1794: msg="invalid index group"; break;
