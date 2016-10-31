@@ -174,57 +174,60 @@ var analyseResponse = function() {
 
     emitAdsError.call(ads, errorId);
 
-    var cb = ads.pending[invokeId].cb;
-    clearTimeout(ads.pending[invokeId].timeout);
-    delete ads.pending[invokeId];
+    if(ads.pending[invokeId]){
+        var cb = ads.pending[invokeId].cb;
+        clearTimeout(ads.pending[invokeId].timeout);
+        delete ads.pending[invokeId];
 
-    if ((!cb) && (commandId !== ID_NOTIFICATION)) {
-        console.log(ads.dataStream, invokeId, commandId);
-        throw "Recieved a response,  but I can't find the request";
+        if ((!cb) && (commandId !== ID_NOTIFICATION)) {
+            console.log(ads.dataStream, invokeId, commandId);
+            throw "Recieved a response,  but I can't find the request";
+        }
+
+        var totHeadSize = ads.tcpHeaderSize + ads.amsHeaderSize;
+        var data = new Buffer(length);
+        ads.dataStream.copy(data, 0, totHeadSize, totHeadSize + length);
+        if (ads.dataStream.length > totHeadSize + length) {
+            var nextdata = new Buffer(ads.dataStream.length - totHeadSize - length);
+            ads.dataStream.copy(nextdata, 0, totHeadSize + length);
+            ads.dataStream = nextdata;
+        } else ads.dataStream = null;
+
+        switch (commandId) {
+            case ID_READ_DEVICE_INFO:
+                getDeviceInfoResult.call(this, data, cb);
+                break;
+            case ID_READ:
+                getReadResult.call(this, data, cb);
+                break;
+            case ID_WRITE:
+                getWriteResult.call(this, data, cb);
+                break;
+            case ID_READ_STATE:
+                //readState.call(this, data, cb);
+                break;
+            case ID_WRITE_CONTROL:
+                //writeControl.call(this, data, cb);
+                break;
+            case ID_ADD_NOTIFICATION:
+                getAddDeviceNotificationResult.call(this, data, cb);
+                break;
+            case ID_DEL_NOTIFICATION:
+                getDeleteDeviceNotificationResult.call(this, data, cb);
+                break;
+            case ID_NOTIFICATION:
+                getNotificationResult.call(this, data);
+                break;
+            case ID_READ_WRITE:
+                getWriteReadResult.call(this, data, cb);
+                break;
+            default:
+                throw 'Unknown command';
+        }
+
+        checkResponseStream.call(ads);
     }
 
-    var totHeadSize = ads.tcpHeaderSize + ads.amsHeaderSize;
-    var data = new Buffer(length);
-    ads.dataStream.copy(data, 0, totHeadSize, totHeadSize + length);
-    if (ads.dataStream.length > totHeadSize + length) {
-        var nextdata = new Buffer(ads.dataStream.length - totHeadSize - length);
-        ads.dataStream.copy(nextdata, 0, totHeadSize + length);
-        ads.dataStream = nextdata;
-    } else ads.dataStream = null;
-
-    switch (commandId) {
-        case ID_READ_DEVICE_INFO:
-            getDeviceInfoResult.call(this, data, cb);
-            break;
-        case ID_READ:
-            getReadResult.call(this, data, cb);
-            break;
-        case ID_WRITE:
-            getWriteResult.call(this, data, cb);
-            break;
-        case ID_READ_STATE:
-            //readState.call(this, data, cb);
-            break;
-        case ID_WRITE_CONTROL:
-            //writeControl.call(this, data, cb);
-            break;
-        case ID_ADD_NOTIFICATION:
-            getAddDeviceNotificationResult.call(this, data, cb);
-            break;
-        case ID_DEL_NOTIFICATION:
-            getDeleteDeviceNotificationResult.call(this, data, cb);
-            break;
-        case ID_NOTIFICATION:
-            getNotificationResult.call(this, data);
-            break;
-        case ID_READ_WRITE:
-            getWriteReadResult.call(this, data, cb);
-            break;
-        default:
-            throw 'Unknown command';
-    }
-
-    checkResponseStream.call(ads);
 };
 
 /////////////////////// ADS FUNCTIONS ///////////////////////
@@ -706,8 +709,10 @@ var runCommand = function(options) {
     options.data.copy(buf, tcpHeaderSize + headerSize, 0);
 
     this.pending[this.invokeId] = {cb:options.cb,timeout:setTimeout(function(){
-        cb('timeout');
-    },300)};
+        delete this.pending[this.invokeId];
+
+        options.cb('timeout');
+    }.bind(this),300)};
 
     logPackage.call(this, "sending", buf, options.commandId, this.invokeId, options.symname);
 
