@@ -174,7 +174,8 @@ var analyseResponse = function() {
 
     emitAdsError.call(ads, errorId);
 
-    var cb = ads.pending[invokeId];
+    var cb = ads.pending[invokeId].cb;
+    clearTimeout(ads.pending[invokeId].timeout);
     delete ads.pending[invokeId];
 
     if ((!cb) && (commandId !== ID_NOTIFICATION)) {
@@ -704,7 +705,9 @@ var runCommand = function(options) {
     header.copy(buf, 0, 0);
     options.data.copy(buf, tcpHeaderSize + headerSize, 0);
 
-    this.pending[this.invokeId] = options.cb;
+    this.pending[this.invokeId] = {cb:options.cb,timeout:setTimeout(function(){
+        cb('timeout');
+    },300)};
 
     logPackage.call(this, "sending", buf, options.commandId, this.invokeId, options.symname);
 
