@@ -1,6 +1,6 @@
 {
     "name": "ads-multiread",
-    "version": "0.1.8",
+    "version": "0.2.0",
     "description": "Twincat ADS protocol implementation for NodeJS",
     "main": "ads.js",
     "keywords": ["twincat","plc", "ads", "beckhoff"],
