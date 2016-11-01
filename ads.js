@@ -23,7 +23,7 @@
 var net = require('net');
 var events = require('events');
 var buf = require('buffer');
-var _ = require('underscore')
+var _ = require('lodash')
 buf.INSPECT_MAX_BYTES = 200;
 
 exports.connect = function(options, cb) {
@@ -149,7 +149,21 @@ var ID_ADD_NOTIFICATION = 6;
 var ID_DEL_NOTIFICATION = 7;
 var ID_NOTIFICATION = 8;
 var ID_READ_WRITE = 9;
-
+var processDataByte = function(inByte){
+    var ads= this;
+    ads._buffer = ads._buffer || [];
+    ads._buffer.push(inByte);
+    var headerSize = ads.tcpHeaderSize + ads.amsHeaderSize;
+    if (ads._buffer.length > headerSize) {
+        var length = ads._buffer.readUInt32LE(26);
+        if (ads._buffer.length >= headerSize + length) {
+            ads.dataStream = Buffer.from(ads._buffer);
+            console.log('ads:',ads.dataStream);
+            ads._buffer=[];
+            analyseResponse.call(ads);
+        }
+    }
+}
 var checkResponseStream = function() {
     var ads = this;
     if (ads.dataStream !== null) {
@@ -174,7 +188,16 @@ var analyseResponse = function() {
 
     emitAdsError.call(ads, errorId);
 
-    if(ads.pending[invokeId]){
+    var totHeadSize = ads.tcpHeaderSize + ads.amsHeaderSize;
+    var data = new Buffer(length);
+    ads.dataStream.copy(data, 0, totHeadSize, totHeadSize + length);
+    if (ads.dataStream.length > totHeadSize + length) {
+        var nextdata = new Buffer(ads.dataStream.length - totHeadSize - length);
+        ads.dataStream.copy(nextdata, 0, totHeadSize + length);
+        ads.dataStream = nextdata;
+    }
+    else ads.dataStream = null;
+    if(ads.pending[invokeId]) {
         var cb = ads.pending[invokeId].cb;
         clearTimeout(ads.pending[invokeId].timeout);
         delete ads.pending[invokeId];
@@ -184,14 +207,6 @@ var analyseResponse = function() {
             throw "Recieved a response,  but I can't find the request";
         }
 
-        var totHeadSize = ads.tcpHeaderSize + ads.amsHeaderSize;
-        var data = new Buffer(length);
-        ads.dataStream.copy(data, 0, totHeadSize, totHeadSize + length);
-        if (ads.dataStream.length > totHeadSize + length) {
-            var nextdata = new Buffer(ads.dataStream.length - totHeadSize - length);
-            ads.dataStream.copy(nextdata, 0, totHeadSize + length);
-            ads.dataStream = nextdata;
-        } else ads.dataStream = null;
 
         switch (commandId) {
             case ID_READ_DEVICE_INFO:
@@ -224,9 +239,9 @@ var analyseResponse = function() {
             default:
                 throw 'Unknown command';
         }
-
-        checkResponseStream.call(ads);
     }
+    checkResponseStream.call(ads);
+
 
 };
 
@@ -424,63 +439,66 @@ var getSymbols = function(cb) {
         cmdSymbols.bytelength = data;
 
         readCommand.call(ads, cmdSymbols, function(err, result) {
-
             var symbols = [];
             var pos = 0;
-            while (pos < result.length) {
-                var symbol = {};
-                var readLength = result.readUInt32LE(pos);
-                symbol.indexGroup = result.readUInt32LE(pos + 4);
-                symbol.indexOffset = result.readUInt32LE(pos + 8);
-                //symbol.size = result.readUInt32LE(pos + 12);
-                //symbol.type = result.readUInt32LE(pos + 16); //ADST_ ...
-                //symbol.something = result.readUInt32LE(pos + 20);
-                var nameLength = result.readUInt16LE(pos + 24) + 1;
-                var typeLength = result.readUInt16LE(pos + 26) + 1;
-                var commentLength = result.readUInt16LE(pos + 28) + 1;
+            if(!err){
+                while (pos < result.length) {
+                    var symbol = {};
+                    var readLength = result.readUInt32LE(pos);
+                    symbol.indexGroup = result.readUInt32LE(pos + 4);
+                    symbol.indexOffset = result.readUInt32LE(pos + 8);
+                    //symbol.size = result.readUInt32LE(pos + 12);
+                    //symbol.type = result.readUInt32LE(pos + 16); //ADST_ ...
+                    //symbol.something = result.readUInt32LE(pos + 20);
+                    var nameLength = result.readUInt16LE(pos + 24) + 1;
+                    var typeLength = result.readUInt16LE(pos + 26) + 1;
+                    var commentLength = result.readUInt16LE(pos + 28) + 1;
 
-                pos = pos + 30;
+                    pos = pos + 30;
 
-                var nameBuf = new Buffer(nameLength);
-                result.copy(nameBuf, 0, pos, pos+nameLength);
-                symbol.name = nameBuf.toString('utf8', 0, findStringEnd(nameBuf, 0));
-                pos = pos+nameLength;
+                    var nameBuf = new Buffer(nameLength);
+                    result.copy(nameBuf, 0, pos, pos+nameLength);
+                    symbol.name = nameBuf.toString('utf8', 0, findStringEnd(nameBuf, 0));
+                    pos = pos+nameLength;
 
-                var typeBuf = new Buffer(typeLength);
-                result.copy(typeBuf, 0, pos, pos+typeLength);
-                symbol.type = typeBuf.toString('utf8', 0, findStringEnd(typeBuf, 0));
-                pos = pos+typeLength;
+                    var typeBuf = new Buffer(typeLength);
+                    result.copy(typeBuf, 0, pos, pos+typeLength);
+                    symbol.type = typeBuf.toString('utf8', 0, findStringEnd(typeBuf, 0));
+                    pos = pos+typeLength;
 
-                var commentBuf = new Buffer(commentLength);
-                result.copy(commentBuf, 0, pos, pos+commentLength);
-                symbol.comment = commentBuf.toString('utf8', 0, findStringEnd(commentBuf, 0));
-                pos = pos+commentLength;
+                    var commentBuf = new Buffer(commentLength);
+                    result.copy(commentBuf, 0, pos, pos+commentLength);
+                    symbol.comment = commentBuf.toString('utf8', 0, findStringEnd(commentBuf, 0));
+                    pos = pos+commentLength;
 
-                if(symbol.type.indexOf('ARRAY') > -1) {
-                    var re = /ARRAY[\s]+\[([\-\d]+)\.\.([\-\d]+)\][\s]+of[\s]+(.*)/i;
-                    var m;
+                    if(symbol.type.indexOf('ARRAY') > -1) {
+                        var re = /ARRAY[\s]+\[([\-\d]+)\.\.([\-\d]+)\][\s]+of[\s]+(.*)/i;
+                        var m;
 
-                    if((m = re.exec(symbol.type)) !== null) {
+                        if((m = re.exec(symbol.type)) !== null) {
 
-                        if(m.index === re.lastIndex) {
-                            re.lastIndex++;
+                            if(m.index === re.lastIndex) {
+                                re.lastIndex++;
+                            }
+
+                            m[1] = parseInt(m[1]);
+                            m[2] = parseInt(m[2]);
+
+                            for(var i=m[1]; i<=m[2]; i++) {
+                                var newSymbol = JSON.parse(JSON.stringify(symbol));
+                                newSymbol.arrayid = i + 0;
+                                newSymbol.type = m[3] + '';
+                                newSymbol.name += '[' + i + ']';
+                                symbols.push(newSymbol);
+                            };
                         }
-
-                        m[1] = parseInt(m[1]);
-                        m[2] = parseInt(m[2]);
-
-                        for(var i=m[1]; i<=m[2]; i++) {
-                            var newSymbol = JSON.parse(JSON.stringify(symbol));
-                            newSymbol.arrayid = i + 0;
-                            newSymbol.type = m[3] + '';
-                            newSymbol.name += '[' + i + ']';
-                            symbols.push(newSymbol);
-                        };
+                    } else {
+                        symbols.push(symbol);
                     }
-                } else {
-                    symbols.push(symbol);
                 }
+
             }
+
 
             cb.call(ads.adsClient, err, symbols);
         });
